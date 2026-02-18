@@ -14,6 +14,34 @@ load_dotenv()
 # Create tables
 models.Base.metadata.create_all(bind=engine)
 
+# Ensure initial admin user exists
+def ensure_admin_user():
+    db = SessionLocal()
+    try:
+        admin_username = "admin"
+        admin = db.query(models.User).filter(models.User.username == admin_username).first()
+        if not admin:
+            print("Creating initial admin user...")
+            hashed_password = auth.get_password_hash("adminpassword")
+            db_admin = models.User(
+                username=admin_username,
+                email="admin@example.com",
+                hashed_password=hashed_password,
+                is_active=True,
+                is_admin=True
+            )
+            db.add(db_admin)
+            db.commit()
+            print("Initial admin user created successfully.")
+    except Exception as e:
+        print(f"Error creating initial admin: {e}")
+    finally:
+        db.close()
+
+# Use SessionLocal from database for the startup check
+from database import SessionLocal
+ensure_admin_user()
+
 app = FastAPI()
 
 # CORS Middleware
