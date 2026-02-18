@@ -16,12 +16,14 @@ models.Base.metadata.create_all(bind=engine)
 
 # Ensure initial admin user exists
 def ensure_admin_user():
+    print("Checking for initial admin user...", flush=True)
+    from database import SessionLocal
     db = SessionLocal()
     try:
         admin_username = "admin"
         admin = db.query(models.User).filter(models.User.username == admin_username).first()
         if not admin:
-            print("Creating initial admin user...")
+            print(f"Admin user '{admin_username}' not found. Creating...", flush=True)
             hashed_password = auth.get_password_hash("adminpassword")
             db_admin = models.User(
                 username=admin_username,
@@ -32,14 +34,15 @@ def ensure_admin_user():
             )
             db.add(db_admin)
             db.commit()
-            print("Initial admin user created successfully.")
+            print(f"Admin user '{admin_username}' created successfully.", flush=True)
+        else:
+            print(f"Admin user '{admin_username}' already exists.", flush=True)
     except Exception as e:
-        print(f"Error creating initial admin: {e}")
+        print(f"CRITICAL ERROR in ensure_admin_user: {e}", flush=True)
     finally:
         db.close()
 
-# Use SessionLocal from database for the startup check
-from database import SessionLocal
+# Run the startup check
 ensure_admin_user()
 
 app = FastAPI()
@@ -87,13 +90,32 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 @app.post("/token", response_model=schemas.Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    print(f"Login attempt: username='{form_data.username}'", flush=True)
     user = db.query(models.User).filter(models.User.username == form_data.username).first()
-    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+    
+    if not user:
+        print(f"Login FAILED: User '{form_data.username}' not found in DB", flush=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Check if user is active
+    if not user.is_active:
+        print(f"Login FAILED: User '{form_data.username}' is inactive", flush=True)
+        raise HTTPException(status_code=400, detail="Inactive user")
+
+    password_verified = auth.verify_password(form_data.password, user.hashed_password)
+    if not password_verified:
+        print(f"Login FAILED: Password mismatch for user '{form_data.username}'", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    print(f"Login SUCCESS: User '{form_data.username}' logged in", flush=True)
     access_token_expires = auth.timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
@@ -138,6 +160,20 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+@app.get("/debug/info")
+def debug_info(db: Session = Depends(get_db)):
+    try:
+        user_count = db.query(models.User).count()
+        users = db.query(models.User.username).all()
+        return {
+            "status": "online",
+            "database": "connected",
+            "user_count": user_count,
+            "usernames": [u.username for u in users]
+        }
+    except Exception as e:
+        return {"status": "error", "database_error": str(e)}
 
 # Employee Management
 @app.get("/employees/", response_model=List[schemas.EmployeeSchema])
