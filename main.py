@@ -50,19 +50,38 @@ app = FastAPI()
 # CORS Middleware
 origins = [
     "http://localhost",
-    "http://localhost:5173", # Vite default port
+    "http://localhost:5173",
     "http://localhost:3000",
+    "https://hrmsfrontends.vercel.app", # User's specific production frontend
 ]
 
 # Allow dynamic origins from environment
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+print(f"DEBUG: ALLOWED_ORIGINS env value: '{allowed_origins_env}'", flush=True)
+
 if allowed_origins_env:
-    origins.extend([o.strip() for o in allowed_origins_env.split(",")])
+    if allowed_origins_env == "*":
+        print("DEBUG: Enabling wildcard CORS (*)", flush=True)
+        origins = ["*"]
+    else:
+        extra_origins = [o.strip() for o in allowed_origins_env.split(",")]
+        print(f"DEBUG: Adding extra origins: {extra_origins}", flush=True)
+        origins.extend(extra_origins)
+
+# Ensure origins are unique
+origins = list(set(origins))
+print(f"DEBUG: Final CORS origins: {origins}", flush=True)
+
+# Important for wildcard origins
+use_credentials = True
+if "*" in origins:
+    use_credentials = False
+    print("DEBUG: credentials disabled due to wildcard origin", flush=True)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=use_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
